@@ -1809,11 +1809,13 @@ class LinearLoader(object):
         filenames = glob.glob(os.path.join(self.resolved_values_dir, "*.yml"))
         self.load_entities_by_id(filenames, self.values, Value)
 
+        self.product_cpes.load_cpes_from_directory_tree(self.resolved_cpe_items_dir, self.env_yaml)
+
         filenames = glob.glob(os.path.join(self.resolved_platforms_dir, "*.yml"))
         self.load_entities_by_id(filenames, self.platforms, Platform)
         self.product_cpes.platforms = self.platforms
 
-        self.product_cpes.load_cpes_from_directory_tree(self.resolved_cpe_items_dir, self.env_yaml)
+    
 
         for g in self.groups.values():
             g.load_entities(self.rules, self.values, self.groups)
@@ -1882,13 +1884,11 @@ class Platform(XCCDFEntity):
         id = test.as_id()
         platform = cls(id)
         platform.test = test
-        platform.test.enrich_with_cpe_info(product_cpes)
+        # in case some cpe_items were parametrized, we might need to create new CPE items
+        platform.test.add_enriched_cpe_items(product_cpes)
         platform.name = id
         platform.original_expression = expression
         platform.xml_content = platform.get_xml()
-        platform.bash_conditional_line = platform.test.get_bash_conditional_line()
-        platform.bash_inserted_before_remediation = platform.test.get_bash_inserted_before_remediation()
-        platform.ansible_conditional = platform.test.to_ansible_conditional()
         return platform
 
     def get_xml(self):
@@ -1908,7 +1908,7 @@ class Platform(XCCDFEntity):
         return xmlstr
 
     def to_xml_element(self):
-        return self.xml_content
+        return ET.fromstring(self.xml_content)
 
     def get_bash_conditional_line(self):
         return self.bash_conditional_line
@@ -1916,18 +1916,21 @@ class Platform(XCCDFEntity):
     def get_bash_inserted_before_remediation(self):
         return self.bash_inserted_before_remediation
 
-    def to_ansible_conditional(self):
+    def get_ansible_conditional(self):
         return self.ansible_conditional
 
     @classmethod
     def from_yaml(cls, yaml_file, env_yaml=None, product_cpes=None):
         platform = super(Platform, cls).from_yaml(yaml_file, env_yaml)
-        platform.xml_content = ET.fromstring(platform.xml_content)
         # if we did receive a product_cpes, we can restore also the original test object
         # it can be later used e.g. for comparison
         if product_cpes:
             platform.test = product_cpes.algebra.parse(
                 platform.original_expression, simplify=True)
+            platform.bash_conditional_line = platform.test.get_bash_conditional_line(product_cpes)
+            platform.bash_inserted_before_remediation = platform.test.get_bash_inserted_before_remediation(product_cpes)
+            platform.ansible_conditional = platform.test.get_ansible_conditional(product_cpes)
+
         return platform
 
     def __eq__(self, other):
